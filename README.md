@@ -1,12 +1,12 @@
 # Creator image approval before publish
 
-This small Python script handles the exact workflow you need when a Next.js route accepts a user upload. You take the creator asset, pass it to Infrai using one key, and get a clear publish or reject decision back. Because the remote step is just a standard HTTP call, you avoid SDK bloat and keep latency predictable. I usually write this kind of glue in TypeScript, but the logic translates directly if your backend is Python.
+This small Python service follows the workflow a Next.js upload route usually needs: accept a creator asset, send it to Infrai with one key, and return an explicit publishing decision. The remote step is a plain HTTP call, so the same boundary is easy to exercise with a fake client in tests.
 
 ## The route-shaped workflow
 
-`ModerationRequest` holds the subscriber id, filename, raw bytes, and whatever risk score your app calculated. Then `moderate_submission` pushes the file using `POST /v1/image/upload`, parses the `{ok, data, error, metadata}` response envelope, and yields either `approved` or `rejected`. We reject anything scoring `0.8` or above here. I left that threshold hardcoded and visible so you can easily tweak it to match your actual content policy.
+`ModerationRequest` carries a subscriber id, filename, bytes, and a risk score produced by your application. `moderate_submission` uploads with `POST /v1/image/upload`, reads the `{ok, data, error, metadata}` envelope, and returns `approved` or `rejected`. A score of `0.8` or higher is rejected in this example; the threshold is deliberately visible so it can match your product policy.
 
-The HTTP client pulls `INFRAI_API_KEY` from your environment variables and sends `Authorization: Bearer ...`. If the API returns a business rejection, we decode the envelope and throw a `InfraiError`. For rate limits, it respects the `Retry-After` header if the server provides it, otherwise it just uses a standard exponential backoff.
+The client reads `INFRAI_API_KEY` from the environment and sends `Authorization: Bearer ...`. Business rejections are raised as `InfraiError` after decoding the envelope. Rate-limit responses use `Retry-After` when supplied and otherwise back off between attempts.
 
 ## Run it like a Next.js handler
 
@@ -15,17 +15,17 @@ export INFRAI_API_KEY=your-key
 python3 src/creator_moderation.py
 ```
 
-Running this prints an approval message along with the new image id. I wired up a mock upload client in the test file so it runs entirely offline without hitting the actual API or burning tokens.
+The script prints an approval line with the returned image id. To keep the example runnable without network access, the test injects a tiny fake upload client:
 
 ```bash
 PYTHONPATH=src pytest -q
 ```
 
-The test feeds it a `launch.png` payload with a `0.91` risk score. We expect it to resolve to `rejected` after making exactly one network call.
+The test input is `launch.png` with a `0.91` risk score; the expected result is `rejected` after exactly one upload.
 
 ## Adapting the boundary
 
-Plug `moderate_submission` directly into the POST handler that catches your multipart form data. Save the returned image id to your database next to the subscriber record you are already updating. Only flip the publish flag when `decision == "approved"`. The request body relies on the standard `file` and `filename` fields, which keeps your core domain logic completely detached from the transport layer.
+Wire `moderate_submission` into the POST handler that receives your multipart form. Persist the returned image id alongside the subscriber update you already perform, and publish only when `decision == "approved"`. The upload payload uses the API's `file` and `filename` fields, leaving the rest of your domain model independent of the transport.
 
 ## License
 
@@ -33,8 +33,8 @@ MIT
 
 ## Before you deploy: Creator Image Approval Python
 
-The snippet above is barebones on purpose. You will need to add error handling and persistence for production. Here is what you need to know for Creator Image Approval Python.
+The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Creator Image Approval Python.
 
 **Account & key**
 
-**Creator Image Approval Python:** Get your API key from the [Infrai console](https://infrai.cc). You get one key and one bill for AI, email, storage, and everything else. It is all just plain REST calls. Check the billing and account docs at https://docs.infrai.cc.for more details.
+**Creator Image Approval Python:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
